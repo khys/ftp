@@ -133,6 +133,7 @@ void pwd_proc(int sd, int ac, char *av[])
         fprintf(stderr, "error\n");
     }
     printf("%s", (char *)pld);
+    free(pld);
 }
 
 void cd_proc(int sd, int ac, char *av[])
@@ -159,7 +160,7 @@ void cd_proc(int sd, int ac, char *av[])
             }
             break;
         case 0x13:
-                fprintf(stderr, "Undefined error\n");
+            fprintf(stderr, "Undefined error\n");
             break;
     }
 }
@@ -203,6 +204,7 @@ void dir_proc(int sd, int ac, char *av[])
     pld = (uint8_t *)malloc(ftph->length);
     pld = pld_recv(sd, ftph->length);
     printf("%s", (char *)pld);
+    free(pld);
 }
 
 void lpwd_proc(int sd, int ac, char *av[])
@@ -304,16 +306,28 @@ void get_proc(int sd, int ac, char *av[])
             exit(1);
         }
     }
-
     data_send(sd, 0x05, 0x00, strlen(av[1]) + 1, (uint8_t *)av[1]);
     ftph = ftph_recv(sd);
-    if (ftph->type != 0x10) {
-        fprintf(stderr, "error: 0x10\n");
-        return;
-    }
-    if (ftph->code != 0x01) {
-        fprintf(stderr, "no data\n");
-        return;
+    switch (ftph->type) {
+        case 0x10:
+            if (ftph->code != 0x01) {
+                fprintf(stderr, "No data\n");
+                return;
+            }
+            break;
+        case 0x11:
+            return;
+        case 0x12:
+            if (ftph->code == 0x00) {
+                fprintf(stderr, "cd: %s: No such file or directory\n",
+                        av[1]);
+            } else if (ftph->code == 0x01) {
+                fprintf(stderr, "%s: Permission denied\n", av[1]);
+            }
+            return;
+        case 0x13:
+            fprintf(stderr, "Undefined error\n");
+            return;
     }
     for (;;) {
         ftph = ftph_recv(sd);
@@ -329,19 +343,20 @@ void get_proc(int sd, int ac, char *av[])
                 close(fd);
                 exit(1);
             }
-            free(pld);
+            // free(pld);
             if (ftph->code == 0x01) {
                 break;
             }
         }
     }
+    free(pld);
     close(fd);
 }
 
 void put_proc(int sd, int ac, char *av[])
 {
-    int fd, cnt;
-    char *filename, *buf;
+    int fd, cnt1, cnt2;
+    char *filename, *buf1, *buf2;
     struct myftph *ftph;
 
     if (ac > 3 || ac < 2) {
@@ -355,7 +370,7 @@ void put_proc(int sd, int ac, char *av[])
     data_send(sd, 0x06, 0x00, strlen(filename) + 1, (uint8_t *)filename);
     ftph = ftph_recv(sd);
     if (ftph->type != 0x10) {
-        fprintf(stderr, "error\n");
+        fprintf(stderr, "%s: File already exists\n", filename);
         return;
     }
     if (ftph->code != 0x02) {
@@ -363,25 +378,44 @@ void put_proc(int sd, int ac, char *av[])
         return;
     }
     if ((fd = open(av[1], O_RDONLY)) < 0) {
-        perror("open");
+        switch (errno) {
+            case ENOENT:
+                fprintf(stderr, "cd: %s: No such file or directory\n",
+                        av[1]);
+                break;
+            case EACCES:
+                fprintf(stderr, "%s: Permission denied\n", av[1]);
+                break;
+            default:
+                perror("open");
+                break;
+        }
         return;
     }
-    buf = (char *)malloc(DATASIZE);
-    while ((cnt = read(fd, buf, DATASIZE))) {
-        if (cnt < 0) {
+    buf1 = (char *)malloc(DATASIZE);
+    cnt1 = read(fd, buf1, DATASIZE);
+    for (;;) {
+        if (cnt1 < 0) {
             data_send(sd, 0x12, 0x01, 0, NULL);
             perror("read");
+            free(buf1);
             close(fd);
             return;
-        } else if (cnt == DATASIZE) {
-            data_send(sd, 0x20, 0x00, cnt, (uint8_t *)buf);
+        } else if (cnt1 == DATASIZE) {
+            buf2 = (char *)malloc(DATASIZE);
+            cnt2 = read(fd, buf2, DATASIZE);
+            if (cnt2 == 0) {
+                break;
+            }
+            data_send(sd, 0x20, 0x00, DATASIZE, (uint8_t *)buf1);
+            buf1 = buf2;
+            cnt1 = cnt2;
         } else {
             break;
         }
     }
-    data_send(sd, 0x20, 0x01, cnt, (uint8_t *)buf);
-    free(buf);
-
+    data_send(sd, 0x20, 0x01, cnt1, (uint8_t *)buf1);
+    free(buf1);
     close(fd);
 }
 

@@ -45,7 +45,18 @@ int main(int argc, char *argv[])
         exit(1);
     } else if (argc == 3) {
         if (chdir(argv[2]) < 0) {
-            fprintf(stderr, "chdir error\n");
+            switch (errno) {
+                case ENOENT:
+                    fprintf(stderr, "cd: %s: No such file or directory\n",
+                            argv[2]);
+                    break;
+                case EACCES:
+                    fprintf(stderr, "%s: Permission denied\n", argv[2]);
+                    break;
+                default:
+                    fprintf(stderr, "chdir: Undefined error\n");
+                    break;
+            }
             exit(1);
         }
     }
@@ -114,8 +125,8 @@ void pwd_exec(int sd, char str[])
     }
     buf = (char *)malloc(DATASIZE);
     fgets(buf, DATASIZE, fp);
-    pclose(fp);
     data_send(sd, 0x10, 0x00, strlen(buf) + 1, (uint8_t *)buf);
+    pclose(fp);
     free(buf);
 }
 
@@ -167,10 +178,9 @@ void list_exec(int sd, char str[])
         lbuf[strlen(lbuf) + 1] = '\n';
         strcat(buf, lbuf);
     }
-    pclose(fp);
-
     data_send(sd, 0x10, 0x01, 0, NULL);
     data_send(sd, 0x20, 0x00, strlen(buf) + 1, (uint8_t *)buf);
+    pclose(fp);
     free(buf);
 }
 
@@ -180,8 +190,17 @@ void retr_exec(int sd, char str[])
     char *buf1, *buf2;
 
     if ((fd = open(str, O_RDONLY)) < 0) {
-        data_send(sd, 0x12, 0x00, 0, NULL);
-        perror("open");
+        switch (errno) {
+            case ENOENT:
+                data_send(sd, 0x12, 0x00, 0, NULL);
+                break;
+            case EACCES:
+                data_send(sd, 0x12, 0x01, 0, NULL);
+                break;
+            default:
+                data_send(sd, 0x13, 0x05, 0, NULL);
+                break;
+        }
         return;
     } else {
         data_send(sd, 0x10, 0x01, 0, NULL);
@@ -210,7 +229,6 @@ void retr_exec(int sd, char str[])
     }
     data_send(sd, 0x20, 0x01, cnt1, (uint8_t *)buf1);
     free(buf1);
-    // free(buf2);
     close(fd);
 }
 
@@ -220,9 +238,12 @@ void stor_exec(int sd, char str[])
     struct myftph *ftph;
     uint8_t *pld;
 
-    if ((fd = open(str, O_WRONLY|O_CREAT|O_EXCL, 0644)) < 0) {
+    if ((fd = open(str, O_WRONLY | O_CREAT | O_EXCL, 0644)) < 0) {
+        if (errno != EEXIST) {
+            perror("open");
+            exit(1);
+        }
         data_send(sd, 0x12, 0x01, 0, NULL);
-        perror("open");
         return;
     } else {
         data_send(sd, 0x10, 0x02, 0, NULL);
@@ -230,13 +251,14 @@ void stor_exec(int sd, char str[])
     for (;;) {
         ftph = ftph_recv(sd); 
         if (ftph->type != 0x20) {
-            fprintf(stderr, "error\n");
+            fprintf(stderr, "error: unexpected type 0x%x\n", ftph->type);
             return;
         } else {
             pld = (uint8_t *)malloc(ftph->length);
             pld = pld_recv(sd, ftph->length);
             if (write(fd, (char *)pld, ftph->length) < 0) {
                 perror("write");
+                free(pld);
                 close(fd);
                 exit(1);
             }
@@ -245,5 +267,6 @@ void stor_exec(int sd, char str[])
             }
         }
     }
+    free(pld);
     close(fd);
 }
