@@ -1,7 +1,7 @@
 // myFTP
 
 // #define DATASIZE (100 * 1024 * 1024)
-#define DATASIZE (100 * 1024 * 1024)
+#define DATASIZE (1 * 1 * 1024)
 #define NARGS    256
 #define BUFLEN   1024
 

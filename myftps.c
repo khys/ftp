@@ -38,6 +38,7 @@ int main(int argc, char *argv[])
     struct type_table *p;
     struct myftph *ftph;
     char lbuf[BUFLEN];
+    pid_t pid;
 
     if (argc != 2 && argc != 3) {
         fprintf(stderr,
@@ -81,26 +82,35 @@ int main(int argc, char *argv[])
         perror("listen");
         exit(1);
     }
-    sktlen = sizeof(struct sockaddr_storage);
-    if ((sd1 = accept(sd0, (struct sockaddr *)&sin, &sktlen)) < 0) {
-        perror("accept");
-        exit(1);
-    }
 
     for (;;) {
-        ftph = ftph_recv(sd1);
-        *lbuf = '\0';
-        if (ftph->length != 0) {
-            strcpy(lbuf, (char *)pld_recv(sd1, ftph->length));
+        sktlen = sizeof(struct sockaddr_storage);
+        if ((sd1 = accept(sd0, (struct sockaddr *)&sin, &sktlen)) < 0) {
+            perror("accept");
+            exit(1);
         }
-        for (p = typ_tbl; p->type; p++) {
-            if (ftph->type == p->type) {
-                (*p->func)(sd1, lbuf);
-                break;
+        pid = fork();
+        if (pid < 0) {
+            perror("fork");
+            exit(1);
+        } else if (pid != 0) {
+            continue;
+        }
+        for (;;) {
+            ftph = ftph_recv(sd1);
+            *lbuf = '\0';
+            if (ftph->length != 0) {
+                strcpy(lbuf, (char *)pld_recv(sd1, ftph->length));
             }
-        }
-        if (p->type == 0) {
-            fprintf(stderr, "unknown type\n");
+            for (p = typ_tbl; p->type; p++) {
+                if (ftph->type == p->type) {
+                    (*p->func)(sd1, lbuf);
+                    break;
+                }
+            }
+            if (p->type == 0) {
+                fprintf(stderr, "unknown type\n");
+            }
         }
     }
     return 0;
