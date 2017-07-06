@@ -382,15 +382,17 @@ void put_proc(int sd, int ac, char *av[])
             case ENOENT:
                 fprintf(stderr, "cd: %s: No such file or directory\n",
                         av[1]);
-                break;
+                data_send(sd, 0x12, 0x00, 0, NULL);
+                return;
             case EACCES:
                 fprintf(stderr, "%s: Permission denied\n", av[1]);
-                break;
+                data_send(sd, 0x12, 0x01, 0, NULL);
+                return;
             default:
                 perror("open");
-                break;
+                data_send(sd, 0x13, 0x05, 0, NULL);
+                return;
         }
-        return;
     }
     buf1 = (char *)malloc(DATASIZE);
     cnt1 = read(fd, buf1, DATASIZE);

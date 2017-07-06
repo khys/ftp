@@ -260,23 +260,34 @@ void stor_exec(int sd, char str[])
     }
     for (;;) {
         ftph = ftph_recv(sd); 
-        if (ftph->type != 0x20) {
-            fprintf(stderr, "error: unexpected type 0x%x\n", ftph->type);
-            return;
-        } else {
-            pld = (uint8_t *)malloc(ftph->length);
-            pld = pld_recv(sd, ftph->length);
-            if (write(fd, (char *)pld, ftph->length) < 0) {
-                perror("write");
-                free(pld);
-                close(fd);
-                exit(1);
-            }
-            if (ftph->code == 0x01) {
+        switch (ftph->type) {
+            case 0x20:
+                pld = (uint8_t *)malloc(ftph->length);
+                pld = pld_recv(sd, ftph->length);
+                if (write(fd, (char *)pld, ftph->length) < 0) {
+                    perror("write");
+                    free(pld);
+                    close(fd);
+                    exit(1);
+                }
+                if (ftph->code == 0x01) {
+                    free(pld);
+                    close(fd);
+                    return;
+                }
                 break;
-            }
+            case 0x12:
+                fprintf(stderr, "error: file open\n");
+                close(fd);
+                return;
+            case 0x13:
+                fprintf(stderr, "undefined error\n");
+                close(fd);
+                return;
+            default:
+                fprintf(stderr, "error: unexpected type 0x%x\n", ftph->type);
+                close(fd);
+                return;
         }
     }
-    free(pld);
-    close(fd);
 }
